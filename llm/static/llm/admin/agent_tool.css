@@ -1,0 +1,12 @@
+.field-python_code .ace_editor,
+.field-parameters .ace_editor {
+    width: 100% !important;
+    border: 1px solid var(--border-color, #ccc);
+    border-radius: 4px;
+}
+
+.field-python_code .django-ace-widget,
+.field-parameters .django-ace-widget {
+    width: 100%;
+    max-width: 100%;
+}
