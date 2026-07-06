@@ -1,4 +1,12 @@
+import re
+
 from django.db import models
+
+
+def slugify_task_name(name: str) -> str:
+    slug = name.strip().lower().replace(" ", "_")
+    slug = re.sub(r"[^a-z0-9_]", "", slug)
+    return slug or "task"
 
 
 class LlmModel(models.Model):
@@ -107,6 +115,23 @@ class AgentTool(models.Model):
         super().delete(*args, **kwargs)
 
 
+class Project(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    description = models.TextField(blank=True)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Project"
+        verbose_name_plural = "Projects"
+
+    def __str__(self) -> str:
+        status = "active" if self.active else "inactive"
+        return f"{self.name} ({status})"
+
+
 class ChatMessage(models.Model):
     class Role(models.TextChoices):
         USER = "user", "User"
@@ -130,3 +155,68 @@ class ChatMessage(models.Model):
 
     def __str__(self) -> str:
         return f"{self.event_id} / {self.agent.name} / {self.role}"
+
+
+class AgentTask(models.Model):
+    agent = models.ForeignKey(
+        LlmAgent,
+        on_delete=models.CASCADE,
+        related_name="tasks",
+    )
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.PROTECT,
+        related_name="tasks",
+    )
+    name = models.CharField(max_length=255)
+    vd_name = models.CharField(max_length=255, editable=False)
+    description = models.TextField()
+    result = models.TextField(blank=True)
+    vd_processed = models.BooleanField(default=False)
+    processed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Agent Task"
+        verbose_name_plural = "Agent Tasks"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "vd_name"],
+                name="unique_agent_task_vd_name",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.agent.name} / {self.project.name} / {self.name}"
+
+    def save(self, *args, **kwargs):
+        if self.agent_id:
+            self.vd_name = unique_vd_name_for_agent(
+                self.agent_id,
+                self.name,
+                exclude_pk=self.pk,
+            )
+        else:
+            self.vd_name = slugify_task_name(self.name)
+        super().save(*args, **kwargs)
+
+
+def unique_vd_name_for_agent(
+    agent_id: int,
+    name: str,
+    *,
+    exclude_pk: int | None = None,
+) -> str:
+    base_slug = slugify_task_name(name)
+    slug = base_slug
+    counter = 2
+    while True:
+        queryset = AgentTask.objects.filter(agent_id=agent_id, vd_name=slug)
+        if exclude_pk is not None:
+            queryset = queryset.exclude(pk=exclude_pk)
+        if not queryset.exists():
+            return slug
+        slug = f"{base_slug}_{counter}"
+        counter += 1

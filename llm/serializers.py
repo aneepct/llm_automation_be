@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import ChatMessage, LlmAgent, LlmModel
+from .models import AgentTask, ChatMessage, LlmAgent, LlmModel, Project
 
 
 class LlmModelSerializer(serializers.ModelSerializer):
@@ -17,6 +17,12 @@ class LlmAgentSerializer(serializers.ModelSerializer):
         fields = ("id", "name", "role", "context", "model")
 
 
+class ProjectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Project
+        fields = ("id", "name", "description")
+
+
 class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage
@@ -27,6 +33,7 @@ class ChatRequestSerializer(serializers.Serializer):
     agent_id = serializers.IntegerField()
     prompt = serializers.CharField()
     event_id = serializers.CharField(max_length=64)
+    agent_task_id = serializers.IntegerField(required=False, allow_null=True)
 
     def validate_agent_id(self, value: int) -> int:
         if not LlmAgent.objects.filter(pk=value, active=True).exists():
@@ -38,6 +45,18 @@ class ChatRequestSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("Event ID is required.")
         return value
+
+    def validate(self, data: dict) -> dict:
+        agent_task_id = data.get("agent_task_id")
+        if agent_task_id is not None:
+            if not AgentTask.objects.filter(
+                pk=agent_task_id,
+                agent_id=data["agent_id"],
+            ).exists():
+                raise serializers.ValidationError(
+                    {"agent_task_id": "Task not found for this agent."}
+                )
+        return data
 
 
 class ChatHistoryRequestSerializer(serializers.Serializer):
@@ -64,3 +83,57 @@ class ClearSessionSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("Event ID is required.")
         return value
+
+
+class AgentTaskCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+    description = serializers.CharField()
+    project_id = serializers.IntegerField()
+
+    def validate_name(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name is required.")
+        return value
+
+    def validate_description(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Description is required.")
+        return value
+
+    def validate_project_id(self, value: int) -> int:
+        if not Project.objects.filter(pk=value, active=True).exists():
+            raise serializers.ValidationError("Active project not found.")
+        return value
+
+
+class AgentTaskSerializer(serializers.ModelSerializer):
+    project = ProjectSerializer(read_only=True)
+
+    class Meta:
+        model = AgentTask
+        fields = (
+            "id",
+            "agent",
+            "project",
+            "name",
+            "vd_name",
+            "description",
+            "result",
+            "vd_processed",
+            "processed",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "agent",
+            "project",
+            "vd_name",
+            "result",
+            "vd_processed",
+            "processed",
+            "created_at",
+            "updated_at",
+        )

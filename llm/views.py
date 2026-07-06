@@ -8,16 +8,29 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import ChatMessage, LlmAgent
+from .models import AgentTask, ChatMessage, LlmAgent, Project
 from .serializers import (
+    AgentTaskCreateSerializer,
+    AgentTaskSerializer,
     ChatHistoryRequestSerializer,
     ChatMessageSerializer,
     ChatRequestSerializer,
     ClearSessionSerializer,
     LlmAgentSerializer,
+    ProjectSerializer,
 )
 from .services import LlmAgentService
 from .session import clear_session_messages, is_session_expired
+from .task_processor import enqueue_agent_task
+
+
+class ProjectListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        projects = Project.objects.filter(active=True).order_by("name")
+        return Response(ProjectSerializer(projects, many=True).data)
 
 
 class AgentListView(APIView):
@@ -92,6 +105,7 @@ class ChatView(View):
             pk=serializer.validated_data["agent_id"]
         )
         prompt = serializer.validated_data["prompt"]
+        agent_task_id = serializer.validated_data.get("agent_task_id")
 
         def event_stream():
             payload = {
@@ -102,7 +116,12 @@ class ChatView(View):
             yield f"data: {json.dumps(payload)}\n\n"
 
             try:
-                for chunk in LlmAgentService.run_stream(agent, prompt, event_id):
+                for chunk in LlmAgentService.run_stream(
+                    agent,
+                    prompt,
+                    event_id,
+                    agent_task_id=agent_task_id,
+                ):
                     payload = {
                         "event_id": event_id,
                         "agent_id": agent.id,
@@ -134,3 +153,46 @@ class ChatView(View):
         response["Cache-Control"] = "no-cache"
         response["X-Accel-Buffering"] = "no"
         return response
+
+
+class AgentTaskListCreateView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, agent_id: int):
+        if not LlmAgent.objects.filter(pk=agent_id, active=True).exists():
+            return Response({"detail": "Active agent not found."}, status=404)
+
+        tasks = AgentTask.objects.filter(agent_id=agent_id).order_by("-created_at")
+        return Response(AgentTaskSerializer(tasks, many=True).data)
+
+    def post(self, request, agent_id: int):
+        try:
+            agent = LlmAgent.objects.get(pk=agent_id, active=True)
+        except LlmAgent.DoesNotExist:
+            return Response({"detail": "Active agent not found."}, status=404)
+
+        serializer = AgentTaskCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        task = AgentTask.objects.create(
+            agent=agent,
+            project_id=serializer.validated_data["project_id"],
+            name=serializer.validated_data["name"],
+            description=serializer.validated_data["description"],
+        )
+        enqueue_agent_task(task.id)
+        return Response(AgentTaskSerializer(task).data, status=201)
+
+
+class AgentTaskDetailView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, task_id: int):
+        try:
+            task = AgentTask.objects.get(pk=task_id)
+        except AgentTask.DoesNotExist:
+            return Response({"detail": "Task not found."}, status=404)
+
+        return Response(AgentTaskSerializer(task).data)

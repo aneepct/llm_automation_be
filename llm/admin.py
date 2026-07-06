@@ -2,13 +2,22 @@ import json
 
 from django import forms
 from django.contrib import admin, messages
+from django.shortcuts import get_object_or_404
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
 from django.utils.html import format_html
 
 from llm.tools.generator import generate_tool_file, validate_python_body
 from llm.tools.registry import reload_registry
 from llm.widgets import JsonAceWidget, PythonAceWidget
 
-from .models import AgentTool, ChatMessage, LlmAgent, LlmModel
+from .models import AgentTask, AgentTool, ChatMessage, LlmAgent, LlmModel, Project
+from .vector_store import (
+    clear_agent_collection,
+    collection_name_for_agent,
+    reset_agent_task_vector_flags,
+)
+from .vector_visualization import build_plotly_html
 
 
 class LlmAgentAdminForm(forms.ModelForm):
@@ -66,6 +75,14 @@ class AgentToolAdminForm(forms.ModelForm):
             except json.JSONDecodeError as exc:
                 raise forms.ValidationError(f"Invalid JSON: {exc}") from exc
         return value
+
+
+@admin.register(Project)
+class ProjectAdmin(admin.ModelAdmin):
+    list_display = ("name", "active", "updated_at")
+    list_filter = ("active",)
+    search_fields = ("name", "description")
+    list_editable = ("active",)
 
 
 @admin.register(LlmModel)
@@ -186,6 +203,7 @@ class LlmAgentAdmin(admin.ModelAdmin):
         "model",
         "use_other_agent",
         "active",
+        "vector_db_link",
         "updated_at",
     )
     list_filter = ("active", "use_other_agent", "model")
@@ -230,6 +248,155 @@ class LlmAgentAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<path:object_id>/vector-visualization/",
+                self.admin_site.admin_view(self.vector_visualization_view),
+                name="llm_llmagent_vector_visualization",
+            ),
+            path(
+                "<path:object_id>/clear-vector-db/",
+                self.admin_site.admin_view(self.clear_vector_db_view),
+                name="llm_llmagent_clear_vector_db",
+            ),
+        ]
+        return custom_urls + urls
+
+    def get_fieldsets(self, request, obj=None):
+        fieldsets = list(super().get_fieldsets(request, obj))
+        if obj:
+            fieldsets.append(
+                (
+                    "Vector database",
+                    {
+                        "fields": ("vector_db_link",),
+                        "description": (
+                            "Visualize or clear this agent's PGVector collection. "
+                            "Clearing resets task vector flags."
+                        ),
+                    },
+                )
+            )
+        return fieldsets
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj:
+            return ("vector_db_link",)
+        return ()
+
+    @admin.display(description="Vector DB")
+    def vector_db_link(self, obj):
+        if not obj.pk:
+            return "—"
+        visualize_url = reverse("admin:llm_llmagent_vector_visualization", args=[obj.pk])
+        clear_url = reverse("admin:llm_llmagent_clear_vector_db", args=[obj.pk])
+        return format_html(
+            '<a class="button" href="{}">Visualize vector DB</a>&nbsp;'
+            '<a class="button" href="{}">Clear vector DB</a>',
+            visualize_url,
+            clear_url,
+        )
+
+    def clear_vector_db_view(self, request, object_id):
+        agent = get_object_or_404(LlmAgent, pk=object_id)
+        point_count = 0
+        try:
+            from .vector_visualization import fetch_collection_rows
+
+            point_count = len(fetch_collection_rows(agent.pk))
+        except Exception:
+            point_count = 0
+
+        if request.method == "POST":
+            try:
+                deleted = clear_agent_collection(agent.pk)
+                reset_count = reset_agent_task_vector_flags(agent.pk)
+                self.message_user(
+                    request,
+                    f"Cleared {deleted} vector(s) and reset {reset_count} task(s) for {agent.name}.",
+                    level=messages.SUCCESS,
+                )
+            except Exception as exc:
+                self.message_user(
+                    request,
+                    f"Failed to clear vector DB: {exc}",
+                    level=messages.ERROR,
+                )
+            return TemplateResponse(
+                request,
+                "admin/llm/llmagent/clear_vector_db.html",
+                {
+                    **self.admin_site.each_context(request),
+                    "title": f"Clear vector DB — {agent.name}",
+                    "agent": agent,
+                    "collection_name": collection_name_for_agent(agent.pk),
+                    "point_count": 0,
+                    "cleared": True,
+                    "opts": self.model._meta,
+                },
+            )
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"Clear vector DB — {agent.name}",
+            "agent": agent,
+            "collection_name": collection_name_for_agent(agent.pk),
+            "point_count": point_count,
+            "cleared": False,
+            "opts": self.model._meta,
+        }
+        return TemplateResponse(
+            request,
+            "admin/llm/llmagent/clear_vector_db.html",
+            context,
+        )
+
+    def vector_visualization_view(self, request, object_id):
+        agent = get_object_or_404(LlmAgent, pk=object_id)
+
+        try:
+            dims = int(request.GET.get("dims", "2"))
+        except (TypeError, ValueError):
+            dims = 2
+        if dims not in (2, 3):
+            dims = 2
+
+        plot_html = ""
+        point_count = 0
+        error = None
+        try:
+            plot_html, point_count = build_plotly_html(agent.pk, dims)
+        except Exception as exc:
+            error = str(exc)
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"Vector DB — {agent.name}",
+            "agent": agent,
+            "dims": dims,
+            "collection_name": collection_name_for_agent(agent.pk),
+            "plot_html": plot_html,
+            "point_count": point_count,
+            "error": error,
+            "opts": self.model._meta,
+        }
+        return TemplateResponse(
+            request,
+            "admin/llm/llmagent/vector_visualization.html",
+            context,
+        )
+
+
+@admin.register(AgentTask)
+class AgentTaskAdmin(admin.ModelAdmin):
+    list_display = ("name", "project", "agent", "vd_processed", "processed", "created_at")
+    list_filter = ("vd_processed", "processed", "agent", "project")
+    search_fields = ("name", "vd_name", "description", "result", "project__name")
+    readonly_fields = ("vd_name", "created_at", "updated_at")
+    autocomplete_fields = ("agent", "project")
 
 
 @admin.register(ChatMessage)

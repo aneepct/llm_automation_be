@@ -1,0 +1,57 @@
+{% extends "admin/base_site.html" %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .vector-clear-panel {
+    max-width: 640px;
+    padding: 24px;
+    background: #f8f8f8;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+  }
+  .vector-clear-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_change' agent.pk %}">{{ agent.name }}</a>
+  &rsaquo; Clear vector DB
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Clear vector DB — {{ agent.name }}</h1>
+<p>Collection: <code>{{ collection_name }}</code></p>
+
+{% if cleared %}
+<div class="vector-clear-panel">
+  <p><strong>Vector database cleared.</strong></p>
+  <p>Task processing flags were reset. Re-process tasks or run <code>reindex_agent_vectors</code> to rebuild vectors.</p>
+  <div class="vector-clear-actions">
+    <a href="{% url 'admin:llm_llmagent_change' agent.pk %}" class="button">Back to agent</a>
+    <a href="{% url 'admin:llm_llmagent_vector_visualization' agent.pk %}" class="button">Visualize vector DB</a>
+  </div>
+</div>
+{% else %}
+<div class="vector-clear-panel">
+  <p>This will permanently delete <strong>{{ point_count }}</strong> embedding{{ point_count|pluralize }} from this agent's PGVector collection.</p>
+  <p>All related <code>AgentTask</code> rows will have <code>vd_processed</code> and <code>processed</code> reset to <code>False</code>.</p>
+  <form method="post">
+    {% csrf_token %}
+    <div class="vector-clear-actions">
+      <input type="submit" value="Confirm clear" class="default" />
+      <a href="{% url 'admin:llm_llmagent_change' agent.pk %}" class="button cancel-link">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

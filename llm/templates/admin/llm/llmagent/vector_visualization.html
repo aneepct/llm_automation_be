@@ -1,0 +1,96 @@
+{% extends "admin/base_site.html" %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .vector-viz-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0 20px;
+  }
+  .vector-viz-toolbar a.button {
+    padding: 8px 14px;
+  }
+  .vector-viz-toolbar a.button.active {
+    background: #417690;
+    color: #fff;
+  }
+  .vector-viz-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 16px;
+    color: #666;
+    font-size: 13px;
+  }
+  .vector-viz-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .vector-viz-legend i {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+  .vector-viz-empty {
+    padding: 24px;
+    background: #f8f8f8;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    color: #666;
+  }
+  .vector-viz-note {
+    margin-top: 12px;
+    color: #888;
+    font-size: 12px;
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_change' agent.pk %}">{{ agent.name }}</a>
+  &rsaquo; Vector visualization
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Vector DB visualization — {{ agent.name }}</h1>
+<p>Collection: <code>{{ collection_name }}</code></p>
+
+<div class="vector-viz-toolbar">
+  <a href="?dims=2" class="button{% if dims == 2 %} active{% endif %}">2D</a>
+  <a href="?dims=3" class="button{% if dims == 3 %} active{% endif %}">3D</a>
+  <a href="{% url 'admin:llm_llmagent_clear_vector_db' agent.pk %}" class="button">Clear vector DB</a>
+  <a href="{% url 'admin:llm_llmagent_change' agent.pk %}" class="button">Back to agent</a>
+</div>
+
+<div class="vector-viz-legend">
+  <span><i style="background:#8b5cf6"></i> project_record</span>
+  <span><i style="background:#f59e0b"></i> project_catalog</span>
+  <span><i style="background:#3b82f6"></i> task_description</span>
+  <span><i style="background:#22c55e"></i> task_result</span>
+  <span><i style="background:#94a3b8"></i> other</span>
+</div>
+
+{% if error %}
+<p class="errornote">{{ error }}</p>
+{% elif not plot_html %}
+<div class="vector-viz-empty">
+  No vectors in this agent's collection yet. Create and process an Agent Task first.
+</div>
+{% else %}
+<div class="vector-viz-plot">{{ plot_html|safe }}</div>
+<p class="vector-viz-note">
+  {{ point_count }} embedding{{ point_count|pluralize }} plotted using t-SNE.
+  Large collections may take a minute to compute.
+</p>
+{% endif %}
+{% endblock %}
