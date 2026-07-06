@@ -12,6 +12,7 @@ DOC_TYPE_COLORS = {
     "project_catalog": "#f59e0b",
     "task_description": "#3b82f6",
     "task_result": "#22c55e",
+    "admin_knowledge": "#ec4899",
 }
 DEFAULT_COLOR = "#94a3b8"
 

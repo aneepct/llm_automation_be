@@ -86,7 +86,7 @@ class LlmAgentService:
                     agent_task_id=agent_task_id,
                     project_id=resolved_project_id,
                     exclude_task_id=exclude_task_id,
-                    doc_types=["task_description", "task_result", "project_record"],
+                    doc_types=["task_description", "task_result", "project_record", "admin_knowledge"],
                 )
                 catalog_docs = fetch_documents_by_metadata(
                     agent_id,

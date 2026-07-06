@@ -8,7 +8,7 @@ from langchain_postgres import PGVector
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from sqlalchemy import delete, select
 
-from .models import AgentTask, Project
+from .models import AgentTask, Project, slugify_task_name
 
 CHUNK_SIZE = 1500
 CHUNK_OVERLAP = 200
@@ -190,6 +190,8 @@ def _prepare_chunks(text: str, doc_type: str) -> list[str]:
         return [text.strip()]
     if doc_type == "task_result":
         return _split_task_result(text)
+    if doc_type == "admin_knowledge":
+        return _split_task_result(text)
     return [text.strip()]
 
 
@@ -309,6 +311,62 @@ def ingest_task_result(*, task: AgentTask) -> None:
     )
 
 
+def admin_knowledge_source_id(title: str) -> str:
+    return f"knowledge:{slugify_task_name(title)}"
+
+
+def ingest_admin_knowledge(
+    *,
+    agent_id: int,
+    title: str,
+    text: str,
+    project: Project | None = None,
+) -> int:
+    title = title.strip()
+    text = text.strip()
+    if not title or not text:
+        return 0
+
+    chunks = _prepare_chunks(text, "admin_knowledge")
+    source_id = admin_knowledge_source_id(title)
+    _delete_by_source_id(agent_id, source_id)
+
+    vector_store = get_vector_store(agent_id)
+    project_id = project.id if project else None
+    project_name = project.name if project else ""
+    metadata = _base_metadata(
+        doc_type="admin_knowledge",
+        source_id=source_id,
+        title=title,
+        project_id=project_id,
+        project_name=project_name,
+    )
+
+    documents: list[Document] = []
+    for index, chunk in enumerate(chunks):
+        header_lines = [
+            f"Knowledge: {title}",
+            "Document type: admin_knowledge",
+        ]
+        if project_id is not None:
+            header_lines.append(f"Project: {project_name} (id={project_id})")
+        header_lines.append("---")
+        body = "\n".join(header_lines) + f"\n{chunk}"
+        documents.append(
+            Document(
+                page_content=body,
+                metadata={**metadata, "chunk_index": index},
+            )
+        )
+
+    vector_store.add_documents(documents)
+    return len(chunks)
+
+
+def delete_admin_knowledge(*, agent_id: int, source_id: str) -> int:
+    return _delete_by_source_id(agent_id, source_id)
+
+
 def ingest_task_document(
     *,
     agent_id: int,
@@ -378,6 +436,30 @@ def fetch_documents_by_metadata(
     return documents
 
 
+def list_admin_knowledge(agent_id: int) -> list[dict]:
+    documents = fetch_documents_by_metadata(
+        agent_id,
+        doc_types=["admin_knowledge"],
+        limit=500,
+    )
+    grouped: dict[str, dict] = {}
+    for document in documents:
+        metadata = document.metadata or {}
+        source_id = metadata.get("source_id", "")
+        if not source_id:
+            continue
+        if source_id not in grouped:
+            grouped[source_id] = {
+                "source_id": source_id,
+                "title": metadata.get("title", source_id),
+                "project_name": metadata.get("project_name", ""),
+                "chunk_count": 0,
+            }
+        grouped[source_id]["chunk_count"] += 1
+
+    return sorted(grouped.values(), key=lambda item: item["title"].lower())
+
+
 def is_inventory_query(query: str) -> bool:
     return bool(INVENTORY_QUERY_PATTERN.search(query))
 
@@ -442,7 +524,7 @@ def search_agent_context(
         k=k,
         filter={
             **metadata_filter,
-            "doc_type": {"$in": ["task_description", "task_result"]},
+            "doc_type": {"$in": ["task_description", "task_result", "admin_knowledge"]},
         },
     )
 

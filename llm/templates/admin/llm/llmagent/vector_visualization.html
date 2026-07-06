@@ -69,6 +69,7 @@
   <a href="?dims=2" class="button{% if dims == 2 %} active{% endif %}">2D</a>
   <a href="?dims=3" class="button{% if dims == 3 %} active{% endif %}">3D</a>
   <a href="{% url 'admin:llm_llmagent_clear_vector_db' agent.pk %}" class="button">Clear vector DB</a>
+  <a href="{% url 'admin:llm_llmagent_push_knowledge' agent.pk %}" class="button">Push knowledge</a>
   <a href="{% url 'admin:llm_llmagent_change' agent.pk %}" class="button">Back to agent</a>
 </div>
 
@@ -77,6 +78,7 @@
   <span><i style="background:#f59e0b"></i> project_catalog</span>
   <span><i style="background:#3b82f6"></i> task_description</span>
   <span><i style="background:#22c55e"></i> task_result</span>
+  <span><i style="background:#ec4899"></i> admin_knowledge</span>
   <span><i style="background:#94a3b8"></i> other</span>
 </div>
 

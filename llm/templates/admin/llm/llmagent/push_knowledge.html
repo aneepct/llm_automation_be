@@ -1,0 +1,142 @@
+{% extends "admin/base_site.html" %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .push-knowledge-panel {
+    max-width: 900px;
+    margin-bottom: 28px;
+    padding: 20px;
+    background: #f8f8f8;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+  }
+  .push-knowledge-panel label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .push-knowledge-panel input[type="text"],
+  .push-knowledge-panel select,
+  .push-knowledge-panel textarea {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 16px;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font: inherit;
+  }
+  .push-knowledge-panel textarea {
+    min-height: 320px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+  }
+  .push-knowledge-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .push-knowledge-list table {
+    width: 100%;
+    max-width: 900px;
+    border-collapse: collapse;
+    margin-top: 12px;
+  }
+  .push-knowledge-list th,
+  .push-knowledge-list td {
+    border: 1px solid #ddd;
+    padding: 8px 10px;
+    text-align: left;
+  }
+  .push-knowledge-list th {
+    background: #f0f0f0;
+  }
+  .push-knowledge-note {
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_change' agent.pk %}">{{ agent.name }}</a>
+  &rsaquo; Push knowledge
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Push knowledge — {{ agent.name }}</h1>
+<p>Collection: <code>{{ collection_name }}</code></p>
+<p class="push-knowledge-note">
+  Paste long text below. It will be chunked and embedded into this agent's vector DB.
+  Re-submitting the same title replaces existing chunks for that title.
+</p>
+
+<div class="push-knowledge-panel">
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="push" />
+
+    <label for="id_title">Title</label>
+    <input type="text" name="title" id="id_title" maxlength="255" required placeholder="e.g. HubLink product overview" />
+
+    <label for="id_project_id">Project (optional)</label>
+    <select name="project_id" id="id_project_id">
+      <option value="">— No project —</option>
+      {% for project in projects %}
+      <option value="{{ project.pk }}">{{ project.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="id_content">Content</label>
+    <textarea name="content" id="id_content" required placeholder="Paste markdown or plain text..."></textarea>
+
+    <div class="push-knowledge-actions">
+      <input type="submit" value="Push to vector DB" class="default" />
+      <a href="{% url 'admin:llm_llmagent_change' agent.pk %}" class="button cancel-link">Back to agent</a>
+      <a href="{% url 'admin:llm_llmagent_vector_visualization' agent.pk %}" class="button">Visualize vector DB</a>
+    </div>
+  </form>
+</div>
+
+<div class="push-knowledge-list">
+  <h2>Pushed knowledge</h2>
+  {% if knowledge_items %}
+  <table>
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Project</th>
+        <th>Chunks</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in knowledge_items %}
+      <tr>
+        <td>{{ item.title }}</td>
+        <td>{{ item.project_name|default:"—" }}</td>
+        <td>{{ item.chunk_count }}</td>
+        <td>
+          <form method="post" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete" />
+            <input type="hidden" name="source_id" value="{{ item.source_id }}" />
+            <input type="submit" value="Delete" class="deletelink" onclick="return confirm('Delete all chunks for this knowledge entry?');" />
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="push-knowledge-note">No manual knowledge pushed yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -15,6 +15,9 @@ from .models import AgentTask, AgentTool, ChatMessage, LlmAgent, LlmModel, Proje
 from .vector_store import (
     clear_agent_collection,
     collection_name_for_agent,
+    delete_admin_knowledge,
+    ingest_admin_knowledge,
+    list_admin_knowledge,
     reset_agent_task_vector_flags,
 )
 from .vector_visualization import build_plotly_html
@@ -262,6 +265,11 @@ class LlmAgentAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.clear_vector_db_view),
                 name="llm_llmagent_clear_vector_db",
             ),
+            path(
+                "<path:object_id>/push-knowledge/",
+                self.admin_site.admin_view(self.push_knowledge_view),
+                name="llm_llmagent_push_knowledge",
+            ),
         ]
         return custom_urls + urls
 
@@ -274,8 +282,8 @@ class LlmAgentAdmin(admin.ModelAdmin):
                     {
                         "fields": ("vector_db_link",),
                         "description": (
-                            "Visualize or clear this agent's PGVector collection. "
-                            "Clearing resets task vector flags."
+                            "Visualize, push manual knowledge, or clear this agent's "
+                            "PGVector collection. Clearing resets task vector flags."
                         ),
                     },
                 )
@@ -293,10 +301,13 @@ class LlmAgentAdmin(admin.ModelAdmin):
             return "—"
         visualize_url = reverse("admin:llm_llmagent_vector_visualization", args=[obj.pk])
         clear_url = reverse("admin:llm_llmagent_clear_vector_db", args=[obj.pk])
+        push_url = reverse("admin:llm_llmagent_push_knowledge", args=[obj.pk])
         return format_html(
             '<a class="button" href="{}">Visualize vector DB</a>&nbsp;'
+            '<a class="button" href="{}">Push knowledge</a>&nbsp;'
             '<a class="button" href="{}">Clear vector DB</a>',
             visualize_url,
+            push_url,
             clear_url,
         )
 
@@ -353,6 +364,93 @@ class LlmAgentAdmin(admin.ModelAdmin):
             "admin/llm/llmagent/clear_vector_db.html",
             context,
         )
+
+    def push_knowledge_view(self, request, object_id):
+        agent = get_object_or_404(LlmAgent, pk=object_id)
+        projects = Project.objects.filter(active=True).order_by("name")
+
+        if request.method == "POST":
+            action = request.POST.get("action", "push")
+            if action == "delete":
+                source_id = request.POST.get("source_id", "").strip()
+                if source_id:
+                    try:
+                        deleted = delete_admin_knowledge(
+                            agent_id=agent.pk,
+                            source_id=source_id,
+                        )
+                        self.message_user(
+                            request,
+                            f"Deleted {deleted} chunk(s) for {source_id}.",
+                            level=messages.SUCCESS,
+                        )
+                    except Exception as exc:
+                        self.message_user(
+                            request,
+                            f"Failed to delete knowledge: {exc}",
+                            level=messages.ERROR,
+                        )
+                return TemplateResponse(
+                    request,
+                    "admin/llm/llmagent/push_knowledge.html",
+                    self._push_knowledge_context(request, agent, projects),
+                )
+
+            title = request.POST.get("title", "").strip()
+            content = request.POST.get("content", "").strip()
+            project_id = request.POST.get("project_id", "").strip()
+            project = None
+            if project_id:
+                project = Project.objects.filter(pk=project_id, active=True).first()
+
+            if not title or not content:
+                self.message_user(
+                    request,
+                    "Title and content are required.",
+                    level=messages.ERROR,
+                )
+            else:
+                try:
+                    chunk_count = ingest_admin_knowledge(
+                        agent_id=agent.pk,
+                        title=title,
+                        text=content,
+                        project=project,
+                    )
+                    self.message_user(
+                        request,
+                        f"Ingested {chunk_count} chunk(s) for '{title}'.",
+                        level=messages.SUCCESS,
+                    )
+                except Exception as exc:
+                    self.message_user(
+                        request,
+                        f"Failed to ingest knowledge: {exc}",
+                        level=messages.ERROR,
+                    )
+
+        return TemplateResponse(
+            request,
+            "admin/llm/llmagent/push_knowledge.html",
+            self._push_knowledge_context(request, agent, projects),
+        )
+
+    def _push_knowledge_context(self, request, agent, projects):
+        knowledge_items: list[dict] = []
+        try:
+            knowledge_items = list_admin_knowledge(agent.pk)
+        except Exception:
+            knowledge_items = []
+
+        return {
+            **self.admin_site.each_context(request),
+            "title": f"Push knowledge — {agent.name}",
+            "agent": agent,
+            "collection_name": collection_name_for_agent(agent.pk),
+            "projects": projects,
+            "knowledge_items": knowledge_items,
+            "opts": self.model._meta,
+        }
 
     def vector_visualization_view(self, request, object_id):
         agent = get_object_or_404(LlmAgent, pk=object_id)
