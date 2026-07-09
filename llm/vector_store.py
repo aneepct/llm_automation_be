@@ -320,7 +320,6 @@ def ingest_admin_knowledge(
     agent_id: int,
     title: str,
     text: str,
-    project: Project | None = None,
 ) -> int:
     title = title.strip()
     text = text.strip()
@@ -332,14 +331,10 @@ def ingest_admin_knowledge(
     _delete_by_source_id(agent_id, source_id)
 
     vector_store = get_vector_store(agent_id)
-    project_id = project.id if project else None
-    project_name = project.name if project else ""
     metadata = _base_metadata(
         doc_type="admin_knowledge",
         source_id=source_id,
         title=title,
-        project_id=project_id,
-        project_name=project_name,
     )
 
     documents: list[Document] = []
@@ -347,10 +342,8 @@ def ingest_admin_knowledge(
         header_lines = [
             f"Knowledge: {title}",
             "Document type: admin_knowledge",
+            "---",
         ]
-        if project_id is not None:
-            header_lines.append(f"Project: {project_name} (id={project_id})")
-        header_lines.append("---")
         body = "\n".join(header_lines) + f"\n{chunk}"
         documents.append(
             Document(
@@ -452,7 +445,6 @@ def list_admin_knowledge(agent_id: int) -> list[dict]:
             grouped[source_id] = {
                 "source_id": source_id,
                 "title": metadata.get("title", source_id),
-                "project_name": metadata.get("project_name", ""),
                 "chunk_count": 0,
             }
         grouped[source_id]["chunk_count"] += 1

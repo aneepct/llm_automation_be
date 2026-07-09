@@ -23,6 +23,22 @@ class ProjectSerializer(serializers.ModelSerializer):
         fields = ("id", "name", "description")
 
 
+class ProjectCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_name(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name is required.")
+        if Project.objects.filter(name__iexact=value).exists():
+            raise serializers.ValidationError("A project with this name already exists.")
+        return value
+
+    def validate_description(self, value: str) -> str:
+        return value.strip()
+
+
 class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage

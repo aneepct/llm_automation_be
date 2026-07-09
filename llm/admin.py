@@ -367,7 +367,6 @@ class LlmAgentAdmin(admin.ModelAdmin):
 
     def push_knowledge_view(self, request, object_id):
         agent = get_object_or_404(LlmAgent, pk=object_id)
-        projects = Project.objects.filter(active=True).order_by("name")
 
         if request.method == "POST":
             action = request.POST.get("action", "push")
@@ -393,15 +392,11 @@ class LlmAgentAdmin(admin.ModelAdmin):
                 return TemplateResponse(
                     request,
                     "admin/llm/llmagent/push_knowledge.html",
-                    self._push_knowledge_context(request, agent, projects),
+                    self._push_knowledge_context(request, agent),
                 )
 
             title = request.POST.get("title", "").strip()
             content = request.POST.get("content", "").strip()
-            project_id = request.POST.get("project_id", "").strip()
-            project = None
-            if project_id:
-                project = Project.objects.filter(pk=project_id, active=True).first()
 
             if not title or not content:
                 self.message_user(
@@ -415,7 +410,6 @@ class LlmAgentAdmin(admin.ModelAdmin):
                         agent_id=agent.pk,
                         title=title,
                         text=content,
-                        project=project,
                     )
                     self.message_user(
                         request,
@@ -432,10 +426,10 @@ class LlmAgentAdmin(admin.ModelAdmin):
         return TemplateResponse(
             request,
             "admin/llm/llmagent/push_knowledge.html",
-            self._push_knowledge_context(request, agent, projects),
+            self._push_knowledge_context(request, agent),
         )
 
-    def _push_knowledge_context(self, request, agent, projects):
+    def _push_knowledge_context(self, request, agent):
         knowledge_items: list[dict] = []
         try:
             knowledge_items = list_admin_knowledge(agent.pk)
@@ -447,7 +441,6 @@ class LlmAgentAdmin(admin.ModelAdmin):
             "title": f"Push knowledge — {agent.name}",
             "agent": agent,
             "collection_name": collection_name_for_agent(agent.pk),
-            "projects": projects,
             "knowledge_items": knowledge_items,
             "opts": self.model._meta,
         }

@@ -17,7 +17,6 @@
     margin-bottom: 6px;
   }
   .push-knowledge-panel input[type="text"],
-  .push-knowledge-panel select,
   .push-knowledge-panel textarea {
     width: 100%;
     box-sizing: border-box;
@@ -76,6 +75,7 @@
 <p class="push-knowledge-note">
   Paste long text below. It will be chunked and embedded into this agent's vector DB.
   Re-submitting the same title replaces existing chunks for that title.
+  Include project names in the content if relevant.
 </p>
 
 <div class="push-knowledge-panel">
@@ -85,14 +85,6 @@
 
     <label for="id_title">Title</label>
     <input type="text" name="title" id="id_title" maxlength="255" required placeholder="e.g. HubLink product overview" />
-
-    <label for="id_project_id">Project (optional)</label>
-    <select name="project_id" id="id_project_id">
-      <option value="">— No project —</option>
-      {% for project in projects %}
-      <option value="{{ project.pk }}">{{ project.name }}</option>
-      {% endfor %}
-    </select>
 
     <label for="id_content">Content</label>
     <textarea name="content" id="id_content" required placeholder="Paste markdown or plain text..."></textarea>
@@ -112,7 +104,6 @@
     <thead>
       <tr>
         <th>Title</th>
-        <th>Project</th>
         <th>Chunks</th>
         <th>Actions</th>
       </tr>
@@ -121,7 +112,6 @@
       {% for item in knowledge_items %}
       <tr>
         <td>{{ item.title }}</td>
-        <td>{{ item.project_name|default:"—" }}</td>
         <td>{{ item.chunk_count }}</td>
         <td>
           <form method="post" style="display:inline;">

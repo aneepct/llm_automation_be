@@ -17,6 +17,7 @@ from .serializers import (
     ChatRequestSerializer,
     ClearSessionSerializer,
     LlmAgentSerializer,
+    ProjectCreateSerializer,
     ProjectSerializer,
 )
 from .services import LlmAgentService
@@ -31,6 +32,15 @@ class ProjectListView(APIView):
     def get(self, request):
         projects = Project.objects.filter(active=True).order_by("name")
         return Response(ProjectSerializer(projects, many=True).data)
+
+    def post(self, request):
+        serializer = ProjectCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        project = Project.objects.create(
+            name=serializer.validated_data["name"],
+            description=serializer.validated_data.get("description", ""),
+        )
+        return Response(ProjectSerializer(project).data, status=201)
 
 
 class AgentListView(APIView):
