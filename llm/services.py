@@ -16,10 +16,13 @@ MAX_TOOL_ITERATIONS = 10
 logger = logging.getLogger(__name__)
 
 RAG_CONTEXT_TEMPLATE = """## Retrieved knowledge (vector database)
-Answer ONLY using facts from the excerpts below.
+Answer using facts from the excerpts below. This is your primary source.
+- When the user asks about products, features, policies, or documentation topics, list concrete details (names, descriptions, steps) found in the excerpts.
+- Do NOT reply with only links or "go browse the site" when the excerpts already contain the answer.
+- You may add a source link at the end only if it helps the user dig deeper.
 - For project names and counts, use ONLY names listed in project_catalog and project_record sections.
-- If the excerpts do not contain enough information, say you do not have that data — do NOT invent project names.
-- Prefer retrieved knowledge for task-specific and project-specific facts.
+- If the excerpts do not contain enough information, say you do not have that data — do NOT invent facts.
+- Format replies in Markdown: use **bold** for emphasis, bullet lists for multiple items, and [label](url) for links.
 
 {context}"""
 
@@ -203,6 +206,53 @@ class LlmAgentService:
             ]
         return data
 
+    @staticmethod
+    def _parse_tool_result(result: str) -> dict | None:
+        try:
+            data = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    @classmethod
+    def _compose_tool_display_reply(cls, results: list[str]) -> str | None:
+        """Return pre-formatted customer reply when tools provide display_markdown."""
+        sections: list[str] = []
+        has_display = False
+        for result in results:
+            data = cls._parse_tool_result(result)
+            if not data:
+                continue
+            display = data.get("display_markdown")
+            if isinstance(display, str) and display.strip():
+                sections.append(display.strip())
+                has_display = True
+            elif data.get("summary"):
+                sections.append(str(data["summary"]))
+        if has_display or sections:
+            return "\n\n".join(sections)
+        return None
+
+    @classmethod
+    def _compact_tool_result_for_llm(cls, result: str) -> str:
+        """Reduce tool payload so the model uses display_markdown instead of writing code."""
+        data = cls._parse_tool_result(result)
+        if not data:
+            return result
+        display = data.get("display_markdown")
+        if isinstance(display, str) and display.strip():
+            return json.dumps(
+                {
+                    "found": data.get("found", True),
+                    "display_markdown": display,
+                    "reply_instruction": (
+                        "Output display_markdown verbatim as the customer-facing reply. "
+                        "Do not write Python, scripts, code blocks, or raw JSON."
+                    ),
+                }
+            )
+        return result
+
     @classmethod
     def _complete_with_tools(
         cls,
@@ -227,18 +277,53 @@ class LlmAgentService:
 
             messages.append(cls._message_to_dict(message))
 
+            tool_results: list[str] = []
             for tool_call in message.tool_calls:
                 arguments = json.loads(tool_call.function.arguments or "{}")
                 result = execute_tool(tool_call.function.name, arguments)
+                tool_results.append(result)
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": result,
+                        "content": cls._compact_tool_result_for_llm(result),
                     }
                 )
 
+            display_reply = cls._compose_tool_display_reply(tool_results)
+            if display_reply:
+                return display_reply
+
         return "Error: tool loop exceeded maximum iterations."
+
+    @classmethod
+    def clean_website_content(cls, agent: LlmAgent, raw_text: str, url: str) -> str:
+        client = cls.build_client(agent)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You clean scraped website text for a knowledge base. "
+                    "Remove navigation, footer, cookie banners, ads, and duplicate boilerplate. "
+                    "Preserve headings, factual content, and structure using plain text or markdown. "
+                    "Return only the cleaned content with no preamble."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Source URL: {url}\n\n"
+                    "Clean the following scraped page content:\n\n"
+                    f"{raw_text}"
+                ),
+            },
+        ]
+        response = client.chat.completions.create(
+            model=agent.model.name,
+            messages=messages,
+        )
+        content = response.choices[0].message.content or ""
+        return content.strip() or raw_text
 
     @classmethod
     def run(cls, agent: LlmAgent, prompt: str, event_id: str, agent_task_id: int | None = None) -> str:

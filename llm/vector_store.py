@@ -16,9 +16,14 @@ MAX_SECTION_SIZE = 1500
 
 _vector_stores: dict[str, PGVector] = {}
 
-INVENTORY_QUERY_PATTERN = re.compile(
-    r"\b(how many|list|names only|all projects|which projects|project names|"
-    r"what projects|name of.*projects|projects.*running)\b",
+PROJECT_INVENTORY_PATTERN = re.compile(
+    r"\b(all projects|which projects|project names|what projects|"
+    r"name of.*projects|projects.*running|names only)\b",
+    re.IGNORECASE,
+)
+
+PROJECT_SCOPED_COUNT_PATTERN = re.compile(
+    r"\b(how many|list)\b.*\bprojects?\b|\bprojects?\b.*\b(how many|list)\b",
     re.IGNORECASE,
 )
 
@@ -112,6 +117,7 @@ def _base_metadata(
     project_name: str = "",
     agent_task_id: int | None = None,
     task_name: str = "",
+    source_url: str = "",
 ) -> dict:
     metadata = {
         "doc_type": doc_type,
@@ -127,6 +133,8 @@ def _base_metadata(
         metadata["agent_task_id"] = str(agent_task_id)
     if task_name:
         metadata["task_name"] = task_name
+    if source_url:
+        metadata["source_url"] = source_url
     return metadata
 
 
@@ -320,6 +328,8 @@ def ingest_admin_knowledge(
     agent_id: int,
     title: str,
     text: str,
+    source_id: str | None = None,
+    source_url: str = "",
 ) -> int:
     title = title.strip()
     text = text.strip()
@@ -327,14 +337,15 @@ def ingest_admin_knowledge(
         return 0
 
     chunks = _prepare_chunks(text, "admin_knowledge")
-    source_id = admin_knowledge_source_id(title)
-    _delete_by_source_id(agent_id, source_id)
+    resolved_source_id = source_id or admin_knowledge_source_id(title)
+    _delete_by_source_id(agent_id, resolved_source_id)
 
     vector_store = get_vector_store(agent_id)
     metadata = _base_metadata(
         doc_type="admin_knowledge",
-        source_id=source_id,
+        source_id=resolved_source_id,
         title=title,
+        source_url=source_url.strip(),
     )
 
     documents: list[Document] = []
@@ -342,8 +353,10 @@ def ingest_admin_knowledge(
         header_lines = [
             f"Knowledge: {title}",
             "Document type: admin_knowledge",
-            "---",
         ]
+        if source_url.strip():
+            header_lines.append(f"Source URL: {source_url.strip()}")
+        header_lines.append("---")
         body = "\n".join(header_lines) + f"\n{chunk}"
         documents.append(
             Document(
@@ -445,6 +458,7 @@ def list_admin_knowledge(agent_id: int) -> list[dict]:
             grouped[source_id] = {
                 "source_id": source_id,
                 "title": metadata.get("title", source_id),
+                "source_url": metadata.get("source_url", ""),
                 "chunk_count": 0,
             }
         grouped[source_id]["chunk_count"] += 1
@@ -453,7 +467,11 @@ def list_admin_knowledge(agent_id: int) -> list[dict]:
 
 
 def is_inventory_query(query: str) -> bool:
-    return bool(INVENTORY_QUERY_PATTERN.search(query))
+    """True only for internal project inventory questions, not product/catalog counts."""
+    return bool(
+        PROJECT_INVENTORY_PATTERN.search(query)
+        or PROJECT_SCOPED_COUNT_PATTERN.search(query)
+    )
 
 
 def search_agent_context(

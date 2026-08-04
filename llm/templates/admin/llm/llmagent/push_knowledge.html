@@ -91,6 +91,7 @@
 
     <div class="push-knowledge-actions">
       <input type="submit" value="Push to vector DB" class="default" />
+      <a href="{% url 'admin:llm_llmagent_push_website_knowledge' agent.pk %}" class="button">Push from website</a>
       <a href="{% url 'admin:llm_llmagent_change' agent.pk %}" class="button cancel-link">Back to agent</a>
       <a href="{% url 'admin:llm_llmagent_vector_visualization' agent.pk %}" class="button">Visualize vector DB</a>
     </div>
@@ -104,6 +105,7 @@
     <thead>
       <tr>
         <th>Title</th>
+        <th>Source URL</th>
         <th>Chunks</th>
         <th>Actions</th>
       </tr>
@@ -112,6 +114,13 @@
       {% for item in knowledge_items %}
       <tr>
         <td>{{ item.title }}</td>
+        <td>
+          {% if item.source_url %}
+          <a href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer">{{ item.source_url }}</a>
+          {% else %}
+          —
+          {% endif %}
+        </td>
         <td>{{ item.chunk_count }}</td>
         <td>
           <form method="post" style="display:inline;">

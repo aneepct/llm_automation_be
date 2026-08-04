@@ -1,0 +1,78 @@
+{% extends "admin/base_site.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+{% if job.status == "pending" or job.status == "running" %}
+<meta http-equiv="refresh" content="3">
+{% endif %}
+{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .website-job-panel {
+    max-width: 900px;
+    margin-bottom: 28px;
+    padding: 20px;
+    background: #f8f8f8;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+  }
+  .website-job-status {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  .website-job-note {
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .website-job-errors {
+    white-space: pre-wrap;
+    background: #fff;
+    border: 1px solid #ddd;
+    padding: 12px;
+    margin-top: 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_change' agent.pk %}">{{ agent.name }}</a>
+  &rsaquo; Website ingest job
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Website ingest job — {{ agent.name }}</h1>
+
+<div class="website-job-panel">
+  <p class="website-job-status">Status: {{ job.get_status_display }}</p>
+  <p>Root URL: <a href="{{ job.root_url }}" target="_blank" rel="noopener noreferrer">{{ job.root_url }}</a></p>
+  <p>Progress: {{ job.completed_count }} / {{ job.total_count }}</p>
+  <p>LLM cleanup: {% if job.use_llm_cleanup %}enabled{% else %}disabled{% endif %}</p>
+
+  {% if job.status == "pending" or job.status == "running" %}
+  <p class="website-job-note">This page refreshes every 3 seconds while the job is running.</p>
+  {% endif %}
+
+  {% if job.error_message %}
+  <h3>Notes</h3>
+  <div class="website-job-errors">{{ job.error_message }}</div>
+  {% endif %}
+
+  <p style="margin-top: 20px;">
+    <a href="{% url 'admin:llm_llmagent_push_website_knowledge' agent.pk %}" class="button">Push from website</a>
+    <a href="{% url 'admin:llm_llmagent_push_knowledge' agent.pk %}" class="button">View pushed knowledge</a>
+    <a href="{% url 'admin:llm_llmagent_vector_visualization' agent.pk %}" class="button">Visualize vector DB</a>
+    <a href="{% url 'admin:llm_llmagent_change' agent.pk %}" class="button cancel-link">Back to agent</a>
+  </p>
+</div>
+{% endblock %}

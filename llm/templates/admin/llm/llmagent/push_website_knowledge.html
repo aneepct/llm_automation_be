@@ -1,0 +1,133 @@
+{% extends "admin/base_site.html" %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .push-website-panel {
+    max-width: 900px;
+    margin-bottom: 28px;
+    padding: 20px;
+    background: #f8f8f8;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+  }
+  .push-website-panel label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .push-website-panel input[type="url"],
+  .push-website-panel input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 16px;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font: inherit;
+  }
+  .push-website-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .push-website-note {
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .push-website-links {
+    max-height: 420px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    background: #fff;
+    padding: 12px;
+    margin-bottom: 16px;
+  }
+  .push-website-links label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-weight: normal;
+    margin-bottom: 8px;
+    word-break: break-all;
+  }
+  .push-website-links input {
+    margin-top: 3px;
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; <a href="{% url 'admin:llm_llmagent_change' agent.pk %}">{{ agent.name }}</a>
+  &rsaquo; Push from website
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Push from website — {{ agent.name }}</h1>
+<p>Collection: <code>{{ collection_name }}</code></p>
+<p class="push-website-note">
+  Enter a website root URL to discover same-domain links, select pages, and ingest them
+  into this agent's vector DB as admin knowledge. Ingestion runs in the background.
+</p>
+
+<div class="push-website-panel">
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="discover" />
+
+    <label for="id_root_url">Website URL</label>
+    <input
+      type="url"
+      name="root_url"
+      id="id_root_url"
+      value="{{ root_url }}"
+      required
+      placeholder="https://example.com/docs/"
+    />
+
+    <div class="push-website-actions">
+      <input type="submit" value="Discover links" class="default" />
+      <a href="{% url 'admin:llm_llmagent_push_knowledge' agent.pk %}" class="button">Push manual knowledge</a>
+      <a href="{% url 'admin:llm_llmagent_change' agent.pk %}" class="button cancel-link">Back to agent</a>
+    </div>
+  </form>
+</div>
+
+{% if discovered_links %}
+<div class="push-website-panel">
+  <h2>Discovered links ({{ discovered_links|length }})</h2>
+  <p class="push-website-note">Same-domain links only. All pages are selected by default.</p>
+
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="start" />
+    <input type="hidden" name="root_url" value="{{ root_url }}" />
+
+    <div class="push-website-links">
+      {% for link in discovered_links %}
+      <label>
+        <input type="checkbox" name="selected_urls" value="{{ link }}" checked />
+        <span>{{ link }}</span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <label>
+      <input type="checkbox" name="use_llm_cleanup" checked />
+      Use LLM to clean scraped content before ingest
+    </label>
+
+    <div class="push-website-actions">
+      <input type="submit" value="Start ingest" class="default" />
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

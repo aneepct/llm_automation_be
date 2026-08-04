@@ -2,7 +2,7 @@ import json
 
 from django import forms
 from django.contrib import admin, messages
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.html import format_html
@@ -11,7 +11,7 @@ from llm.tools.generator import generate_tool_file, validate_python_body
 from llm.tools.registry import reload_registry
 from llm.widgets import JsonAceWidget, PythonAceWidget
 
-from .models import AgentTask, AgentTool, ChatMessage, LlmAgent, LlmModel, Project
+from .models import AgentTask, AgentTool, ChatMessage, LlmAgent, LlmModel, Project, WebsiteKnowledgeJob
 from .vector_store import (
     clear_agent_collection,
     collection_name_for_agent,
@@ -21,6 +21,8 @@ from .vector_store import (
     reset_agent_task_vector_flags,
 )
 from .vector_visualization import build_plotly_html
+from .website_knowledge import discover_links
+from .website_knowledge_processor import enqueue_website_knowledge_job
 
 
 class LlmAgentAdminForm(forms.ModelForm):
@@ -270,6 +272,16 @@ class LlmAgentAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.push_knowledge_view),
                 name="llm_llmagent_push_knowledge",
             ),
+            path(
+                "<path:object_id>/push-website-knowledge/",
+                self.admin_site.admin_view(self.push_website_knowledge_view),
+                name="llm_llmagent_push_website_knowledge",
+            ),
+            path(
+                "<path:object_id>/website-knowledge-job/<int:job_id>/",
+                self.admin_site.admin_view(self.website_knowledge_job_view),
+                name="llm_llmagent_website_knowledge_job",
+            ),
         ]
         return custom_urls + urls
 
@@ -302,12 +314,15 @@ class LlmAgentAdmin(admin.ModelAdmin):
         visualize_url = reverse("admin:llm_llmagent_vector_visualization", args=[obj.pk])
         clear_url = reverse("admin:llm_llmagent_clear_vector_db", args=[obj.pk])
         push_url = reverse("admin:llm_llmagent_push_knowledge", args=[obj.pk])
+        push_website_url = reverse("admin:llm_llmagent_push_website_knowledge", args=[obj.pk])
         return format_html(
             '<a class="button" href="{}">Visualize vector DB</a>&nbsp;'
             '<a class="button" href="{}">Push knowledge</a>&nbsp;'
+            '<a class="button" href="{}">Push from website</a>&nbsp;'
             '<a class="button" href="{}">Clear vector DB</a>',
             visualize_url,
             push_url,
+            push_website_url,
             clear_url,
         )
 
@@ -427,6 +442,103 @@ class LlmAgentAdmin(admin.ModelAdmin):
             request,
             "admin/llm/llmagent/push_knowledge.html",
             self._push_knowledge_context(request, agent),
+        )
+
+    def push_website_knowledge_view(self, request, object_id):
+        agent = get_object_or_404(LlmAgent, pk=object_id)
+        discovered_links: list[str] = []
+        root_url = ""
+
+        if request.method == "POST":
+            action = request.POST.get("action", "discover")
+            root_url = request.POST.get("root_url", "").strip()
+
+            if action == "discover":
+                if not root_url:
+                    self.message_user(
+                        request,
+                        "Website URL is required.",
+                        level=messages.ERROR,
+                    )
+                else:
+                    try:
+                        discovered_links = discover_links(root_url)
+                        if not discovered_links:
+                            self.message_user(
+                                request,
+                                "No same-domain links found for that URL.",
+                                level=messages.WARNING,
+                            )
+                    except Exception as exc:
+                        self.message_user(
+                            request,
+                            f"Failed to discover links: {exc}",
+                            level=messages.ERROR,
+                        )
+            elif action == "start":
+                selected_urls = request.POST.getlist("selected_urls")
+                use_llm_cleanup = request.POST.get("use_llm_cleanup") == "on"
+                root_url = request.POST.get("root_url", "").strip()
+
+                if not root_url:
+                    self.message_user(
+                        request,
+                        "Website URL is required.",
+                        level=messages.ERROR,
+                    )
+                elif not selected_urls:
+                    self.message_user(
+                        request,
+                        "Select at least one page to ingest.",
+                        level=messages.ERROR,
+                    )
+                else:
+                    job = WebsiteKnowledgeJob.objects.create(
+                        agent=agent,
+                        root_url=root_url,
+                        selected_urls=selected_urls,
+                        use_llm_cleanup=use_llm_cleanup,
+                        total_count=len(selected_urls),
+                    )
+                    enqueue_website_knowledge_job(job.pk)
+                    return redirect(
+                        "admin:llm_llmagent_website_knowledge_job",
+                        object_id=agent.pk,
+                        job_id=job.pk,
+                    )
+
+        return TemplateResponse(
+            request,
+            "admin/llm/llmagent/push_website_knowledge.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Push from website — {agent.name}",
+                "agent": agent,
+                "collection_name": collection_name_for_agent(agent.pk),
+                "root_url": root_url,
+                "discovered_links": discovered_links,
+                "opts": self.model._meta,
+            },
+        )
+
+    def website_knowledge_job_view(self, request, object_id, job_id):
+        agent = get_object_or_404(LlmAgent, pk=object_id)
+        job = get_object_or_404(
+            WebsiteKnowledgeJob,
+            pk=job_id,
+            agent=agent,
+        )
+
+        return TemplateResponse(
+            request,
+            "admin/llm/llmagent/website_knowledge_job.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Website ingest job — {agent.name}",
+                "agent": agent,
+                "job": job,
+                "opts": self.model._meta,
+            },
         )
 
     def _push_knowledge_context(self, request, agent):

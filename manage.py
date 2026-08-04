@@ -26,6 +26,8 @@ def main():
         ) from exc
 
     command = sys.argv[1] if len(sys.argv) > 1 else "help"
+    if command == "runserver" and len(sys.argv) == 2:
+        sys.argv.append("0.0.0.0:8000")
     if command not in SKIP_AUTO_MIGRATE:
         import django
 

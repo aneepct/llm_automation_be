@@ -220,3 +220,39 @@ def unique_vd_name_for_agent(
             return slug
         slug = f"{base_slug}_{counter}"
         counter += 1
+
+
+class WebsiteKnowledgeJob(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    agent = models.ForeignKey(
+        LlmAgent,
+        on_delete=models.CASCADE,
+        related_name="website_knowledge_jobs",
+    )
+    root_url = models.URLField()
+    selected_urls = models.JSONField(default=list)
+    use_llm_cleanup = models.BooleanField(default=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    completed_count = models.PositiveIntegerField(default=0)
+    total_count = models.PositiveIntegerField(default=0)
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Website Knowledge Job"
+        verbose_name_plural = "Website Knowledge Jobs"
+
+    def __str__(self) -> str:
+        return f"{self.agent.name} / {self.root_url} ({self.status})"
+
